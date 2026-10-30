@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.api_env/
+.venv/
+
+# Node / Vite
+node_modules/
+.pnpm-store/
+pnpm-store/
+dist/
+.vite/
+*.log
+
+# 本地验证临时产物
+.verify/
+.edge-profile/

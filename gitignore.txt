@@ -1,0 +1,23 @@
+# ===== Python / FastAPI 后端 =====
+.venv/
+__pycache__/
+*.py[cod]
+*.db
+.pytest_cache/
+
+# ===== Node / React 前端 =====
+node_modules/
+dist/
+.vite/
+*.local
+
+# ===== 项目专属大文件与构建产物 =====
+release/
+build/
+docs/*.png
+
+# ===== 系统与编辑器 =====
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

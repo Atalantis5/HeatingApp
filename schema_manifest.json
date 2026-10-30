@@ -1,0 +1,315 @@
+{
+  "manifest_version": "2.0",
+  "generated_by": "data-loader（团队成员）",
+  "generated_at": "2026-10-30",
+  "revision_note": "task-2：按用户仲裁修正 task-1 的契约冲突版本（manifest_version 1.0 → 2.0）",
+  "task": "05_engine/04 ProgramFile 数据加载与查表逻辑：pandas 读取三张 Excel + numpy.interp / numpy.searchsorted；插值与选径分离，主接口 select_dn(G, R_pj_target)；不做任何水力计算",
+  "source_directory": "05_engine/02 Calculation Sheet",
+  "read_only_policy": "02 Calculation Sheet 全目录只读（本步未创建/修改/删除其中任何文件）；04 ProgramFile/README.md 亦未修改。",
+  "created_files": [
+    "05_engine/04 ProgramFile/data_loader.py",
+    "05_engine/04 ProgramFile/schema_manifest.json",
+    "05_engine/04 ProgramFile/test_lookup.py"
+  ],
+  "tables": {
+    "pipe_hydraulic_table": {
+      "file": "05_engine/02 Calculation Sheet/热水采暖管道水力计算表.xlsx",
+      "sheet": "Sheet1",
+      "used_range": "A1:G113（A~D 有数据，E~G 为空列）",
+      "title_row": "第 1 行（合并单元格 A1:D1，内容：管径水力计算参数表）",
+      "header_row": "第 2 行（管径 / 流量 G (kg/h) / 流速 v (m/s) / 比摩阻 R (Pa/m)）",
+      "data_row_range": "第 3~113 行（共 111 行）",
+      "data_row_count": 111,
+      "columns": [
+        {
+          "excel_column": "A",
+          "name": "管径",
+          "semantic": "公称管径 DN 分组标签，共 DN15 / DN20 / DN25 / DN32 / DN40 / DN50 / DN65 / DN80 / DN100 九组；分组标签为纵向合并单元格，仅每组首行有值",
+          "dtype": "字符串"
+        },
+        {
+          "excel_column": "B",
+          "name": "流量 G (kg/h)",
+          "semantic": "该表行的流量，单位 kg/h；同一 DN 组内严格递增，无空值",
+          "dtype": "数值"
+        },
+        {
+          "excel_column": "C",
+          "name": "流速 v (m/s)",
+          "semantic": "该表行的流速，单位 m/s；原表绝大多数随 G 递增，存在个别非单调行（见 data_quality_notes）",
+          "dtype": "数值"
+        },
+        {
+          "excel_column": "D",
+          "name": "比摩阻 R (Pa/m)",
+          "semantic": "该表行的比摩阻，单位 Pa/m；原表存在个别非单调行（见 data_quality_notes），加载时保留原值不做清洗",
+          "dtype": "数值"
+        }
+      ],
+      "merged_cells": {
+        "A1:D1": "标题行（管径水力计算参数表）",
+        "A3:A14": "DN15 分组标签",
+        "A15:A26": "DN20 分组标签",
+        "A27:A37": "DN25 分组标签",
+        "A38:A50": "DN32 分组标签",
+        "A51:A63": "DN40 分组标签",
+        "A64:A76": "DN50 分组标签",
+        "A77:A89": "DN65 分组标签",
+        "A90:A101": "DN80 分组标签",
+        "A102:A113": "DN100 分组标签"
+      },
+      "dn_groups": [
+        {"dn": "DN15", "dn_mm": 15, "excel_row_range": "3-14", "row_count": 12, "G_range_kg_h": [10, 206]},
+        {"dn": "DN20", "dn_mm": 20, "excel_row_range": "15-26", "row_count": 12, "G_range_kg_h": [12, 371]},
+        {"dn": "DN25", "dn_mm": 25, "excel_row_range": "27-37", "row_count": 11, "G_range_kg_h": [20, 618]},
+        {"dn": "DN32", "dn_mm": 32, "excel_row_range": "38-50", "row_count": 13, "G_range_kg_h": [34, 1382]},
+        {"dn": "DN40", "dn_mm": 40, "excel_row_range": "51-63", "row_count": 13, "G_range_kg_h": [71, 1899]},
+        {"dn": "DN50", "dn_mm": 50, "excel_row_range": "64-76", "row_count": 13, "G_range_kg_h": [119, 3165]},
+        {"dn": "DN65", "dn_mm": 65, "excel_row_range": "77-89", "row_count": 13, "G_range_kg_h": [130, 5229]},
+        {"dn": "DN80", "dn_mm": 80, "excel_row_range": "90-101", "row_count": 12, "G_range_kg_h": [183, 7336]},
+        {"dn": "DN100", "dn_mm": 100, "excel_row_range": "102-113", "row_count": 12, "G_range_kg_h": [318, 12720]}
+      ],
+      "cell_handling": {
+        "read_method": "pandas.read_excel(..., sheet_name=Sheet1, header=None) 读取原始网格，再用 iloc 切分标题行/表头行/数据行",
+        "title_row": "第 1 行为合并标题，读取后跳过，不作为列名",
+        "header_row": "第 2 行作为列名，保持 Excel 原始表头文本（含空格与单位）",
+        "merged_dn_labels": "A3:A14 等九组合并标签仅首格有值，加载时对“管径”列执行向下填充（ffill）还原每行所属 DN",
+        "empty_cells": "数据区第 3~113 行的 管径 / 流量 G / 流速 v / 比摩阻 R 均无空单元格（加载后校验通过）；E~G 为空列不读取",
+        "data_cleaning": "不做清洗：非单调行按原表原值保留；np.interp 使用同一 DN 组内按 G 升序的表行原值"
+      },
+      "data_quality_notes": [
+        "DN25 组：G=103 行 R=1.9，小于前一行 G=93 的 R=1.95（两行 v 均为 0.04）",
+        "DN40 组：G=712 行 R=4.5，小于前一行 G=519 的 R=5.58（v 由 0.11 升至 0.15）",
+        "DN50 组：G=767 行 v=0.1，小于前一行 G=633 的 v=0.12；R 由 1.5 升至 3.18",
+        "DN65 组：G=1569 行 R=1.6，小于前一行 G=1287 的 R=2.39（v 由 0.1 升至 0.12）",
+        "上述非单调行位于锚点插值区间附近时会影响局部线性插值结果（例如 DN65 锚点行 G=1287 的前一行 G=1046 的 R=0.7），加载时未做任何修正"
+      ]
+    },
+    "local_loss_coefficient_table": {
+      "file": "05_engine/02 Calculation Sheet/局部阻力系数.xlsx",
+      "sheet": "Sheet1",
+      "used_range": "A1:C16",
+      "header_row": "第 1 行（名称 / 形式 / ξ）",
+      "data_row_range": "第 2~16 行（共 15 行）",
+      "data_row_count": 15,
+      "columns": [
+        {"excel_column": "A", "name": "名称", "semantic": "局部阻力构件名称（球形（截止）阀、角阀、闸阀、止回阀、90°弯头、三通、突然扩大、突然缩小）", "dtype": "字符串"},
+        {"excel_column": "B", "name": "形式", "semantic": "构件规格/形式（如 全开DN40以下、DN50以上、短的、长的、d/D=1/2）；三通的 4 行形式在源表中为空", "dtype": "字符串（可空）"},
+        {"excel_column": "C", "name": "ξ", "semantic": "局部阻力系数 ξ 数值，无空值", "dtype": "数值"}
+      ],
+      "merged_cells": {
+        "A2:A3": "球形（截止）阀 名称标签",
+        "A4:A5": "角阀 名称标签",
+        "A6:A7": "闸阀 名称标签",
+        "A9:A10": "90°弯头 名称标签",
+        "A11:A14": "三通 名称标签",
+        "B11:B14": "三通 形式列的合并空单元格（源表未标注形式）"
+      },
+      "groups": [
+        {"name": "球形（截止）阀", "excel_row_range": "2-3", "row_count": 2},
+        {"name": "角阀", "excel_row_range": "4-5", "row_count": 2},
+        {"name": "闸阀", "excel_row_range": "6-7", "row_count": 2},
+        {"name": "止回阀", "excel_row_range": "8", "row_count": 1},
+        {"name": "90°弯头", "excel_row_range": "9-10", "row_count": 2},
+        {"name": "三通", "excel_row_range": "11-14", "row_count": 4},
+        {"name": "突然扩大", "excel_row_range": "15", "row_count": 1},
+        {"name": "突然缩小", "excel_row_range": "16", "row_count": 1}
+      ],
+      "cell_handling": {
+        "read_method": "pandas.read_excel(..., sheet_name=Sheet1, header=None)，第 1 行作表头",
+        "merged_name_labels": "A2:A3、A4:A5、A6:A7、A9:A10、A11:A14 合并单元格仅首格有值，加载时对“名称”列向下填充",
+        "merged_form_cells": "B11:B14 为三通的合并空单元格（左上角原本为空），加载时保持空值（NaN），不向下填充，避免把“长的”等上一组形式误填给三通",
+        "empty_cells": "“形式”列允许空值；ξ 列无空值"
+      }
+    },
+    "gravity_extra_pressure_table": {
+      "file": "05_engine/02 Calculation Sheet/重力循环上供下回热水供暖系统附加压力.xlsx",
+      "sheet": "Sheet1",
+      "used_range": "A1:H13",
+      "title_row": "第 1 行（合并单元格 A1:H1，内容：重力循环上供下回双管热水供暖系统中的附加压力（Pa））",
+      "header_rows": "第 2~3 行（两层表头：纵向表头 A2:A3、B2:B3；横向组标题 C2:H2 与具体档位 C3:H3）",
+      "section_label_rows": "第 4 行（未保温的明装立管(1)1层或2层的房屋）、第 9 行（（2）3层或4层的房屋），均为 A:H 合并单元格",
+      "data_row_range": "第 5~8 行（分节一，4 行）、第 10~13 行（分节二，4 行），共 8 行",
+      "data_row_count": 8,
+      "columns": [
+        {"excel_column": "A", "name": "系统的水平距离(m)", "semantic": "行维度：系统水平距离档位（25以下、25~50、50~75、75~100）；源表部分值带前导空格（如 50~75），加载时 strip", "dtype": "字符串"},
+        {"excel_column": "B", "name": "锅炉到散热器的高度(m)", "semantic": "行维度：高度档位（分节一为 7以下，分节二为 15以下）", "dtype": "字符串"},
+        {"excel_column": "C", "name": "<10", "semantic": "自总立管至计算立管之间的水平距离 <10 m 时的附加压力，单位 Pa", "dtype": "数值（可空）"},
+        {"excel_column": "D", "name": "10～20", "semantic": "水平距离 10～20 m 档位的附加压力，单位 Pa", "dtype": "数值（可空）"},
+        {"excel_column": "E", "name": "20～30", "semantic": "水平距离 20～30 m 档位的附加压力，单位 Pa", "dtype": "数值（可空）"},
+        {"excel_column": "F", "name": "30～50", "semantic": "水平距离 30～50 m 档位的附加压力，单位 Pa", "dtype": "数值（可空）"},
+        {"excel_column": "G", "name": "50～75", "semantic": "水平距离 50～75 m 档位的附加压力，单位 Pa", "dtype": "数值（可空）"},
+        {"excel_column": "H", "name": "75～100", "semantic": "水平距离 75～100 m 档位的附加压力，单位 Pa", "dtype": "数值（可空）"}
+      ],
+      "merged_cells": {
+        "A1:H1": "标题行",
+        "A2:A3": "纵向表头：系统的水平距离(m)",
+        "B2:B3": "纵向表头：锅炉到散热器的高度(m)",
+        "C2:H2": "横向组标题：自总立管至计算立管之间的水平距离(m)",
+        "A4:H4": "分节标签：未保温的明装立管(1)1层或2层的房屋",
+        "A9:H9": "分节标签：（2）3层或4层的房屋"
+      },
+      "groups": [
+        {"section": "未保温的明装立管(1)1层或2层的房屋", "height_range": "7以下", "excel_row_range": "5-8", "row_count": 4},
+        {"section": "（2）3层或4层的房屋", "height_range": "15以下", "excel_row_range": "10-13", "row_count": 4}
+      ],
+      "cell_handling": {
+        "read_method": "pandas.read_excel(..., sheet_name=Sheet1, header=None)，按固定行号切分两层表头、分节标签与数据行",
+        "merged_section_labels": "A4:H4、A9:H9 合并单元格仅首格有值，长表化时作为“房屋类型”列填入对应分节的 4 行",
+        "merged_header": "C2:H2 为横向组标题合并单元格，具体档位取自第 3 行（<10、10～20、20～30、30～50、50～75、75～100）",
+        "empty_cells": "源表未覆盖的“距离档位 × 系统水平距离”组合为空单元格（如分节一的 30~50 及以后列多为空），加载时保留为空（NaN/null），不视为 0",
+        "whitespace": "行维度字符串做 strip 处理（源表 50~75 存在前导空格）"
+      }
+    }
+  },
+  "row_count_checks": {
+    "pipe_hydraulic_table_data_rows": 111,
+    "pipe_hydraulic_table_requirement": "> 100",
+    "pipe_hydraulic_table_pass": true,
+    "local_loss_coefficient_table_data_rows": 15,
+    "gravity_extra_pressure_table_data_rows": 8,
+    "dn_group_row_counts": {
+      "DN15": 12, "DN20": 12, "DN25": 11, "DN32": 13, "DN40": 13,
+      "DN50": 13, "DN65": 13, "DN80": 12, "DN100": 12
+    },
+    "dn_group_row_counts_sum": 111,
+    "dn_group_row_counts_sum_matches_data_rows": true
+  },
+  "selection_contract": {
+    "primary_function": "data_loader.select_dn(G: float, R_pj_target: float) -> dict",
+    "return_keys": ["dn", "G_actual", "v", "Rm"],
+    "coverage": "仅当 G 落在某 DN 组表行 G 的 [min, max] 区间内（含端点）时，该 DN 组才参与候选",
+    "interpolation": "每个候选 DN 组内使用 numpy.interp 按 G 对 v 与 Rm 线性插值（跨 DN 组不插值）",
+    "selection_rule": "在所有候选中选取 |插值 Rm - R_pj_target| 最小者",
+    "tie_break": "若多个 DN 的 |Rm - R_pj_target| 相同，取 DN_ORDER 靠前者（较小管径）",
+    "G_actual_semantic": "所选 DN 组内最接近 G 的表行流量（由 numpy.searchsorted 定位，仅作数据出处标注，不参与插值）",
+    "separated_functions": {
+      "interpolate": "data_loader.interpolate_pipe(G) -> {dn: {G_actual, v, Rm}}（仅插值，不选径）",
+      "select": "data_loader.select_dn(G, R_pj_target)（选径主接口，内部调用 interpolate_pipe）"
+    },
+    "compat_shell": {
+      "function": "data_loader.lookup_pipe(G, R_target=None)",
+      "behavior": "R_target 为 None 时显式 raise ValueError 并在提示中要求改用 select_dn(G, R_pj_target)；R_target 非 None 时委托 select_dn(G, R_target)"
+    },
+    "numpy_functions": {
+      "interpolation": "numpy.interp",
+      "row_locating": "numpy.searchsorted",
+      "selection": "numpy 数组绝对差、numpy.argmin（并列取首个 = DN_ORDER 靠前）"
+    },
+    "excluded": "本模块不含任何水力计算：无阻力/动压/局部阻力累加/富裕度/流量公式等计算代码",
+    "examples": [
+      {
+        "input": {"G": 1286.2, "R_pj_target": 4.95},
+        "output": {"dn": "DN65", "G_actual": 1287.0, "v": 0.09993360995850623, "Rm": 2.384390041493776}
+      },
+      {
+        "input": {"G": 639.7, "R_pj_target": 4.95},
+        "output": {"dn": "DN40", "G_actual": 712.0, "v": 0.13501554404145077, "Rm": 4.904580310880829}
+      },
+      {
+        "input": {"G": 419.6, "R_pj_target": 16.24},
+        "output": {"dn": "DN32", "G_actual": 345.0, "v": 0.1215606936416185, "Rm": 7.973526011560694}
+      }
+    ]
+  },
+  "anchors": {
+    "source_markdown": "05_engine/02 Calculation Sheet/默认模型的计算典例.md",
+    "source_markdown_line_count": 100,
+    "tolerance_rule": "DN 必须 100% 相等；数值 |actual-expected| <= max(0.05, 0.02*|expected|)",
+    "select_dn_anchors": [
+      {
+        "segment": 7,
+        "md_lines": "MD L20（R_pj≈4.95）/ L24 / L31",
+        "input": {"G": 1286.2, "R_pj_target": 4.95},
+        "expected": {"dn": "DN65", "G_actual": 1287.0, "v": 0.09993360995850623, "Rm": 2.384390041493776},
+        "tolerance": {"dn": 0.0, "G_actual": 0.0, "v": 0.05, "Rm": 0.05},
+        "md_original_selection": {
+          "dn": "DN65", "excel_row": 84, "G_row": 1287.0, "v": 0.10, "Rm": 2.39,
+          "role": "MD 表行原值，仅诊断对照；仲裁后数值期望改为“锁定 DN 后的插值结果”"
+        }
+      },
+      {
+        "segment": 10,
+        "md_lines": "MD L20（R_pj≈4.95）/ L33",
+        "input": {"G": 639.7, "R_pj_target": 4.95},
+        "expected": {"dn": "DN40", "G_actual": 712.0, "v": 0.13501554404145077, "Rm": 4.904580310880829},
+        "tolerance": {"dn": 0.0, "G_actual": 0.0, "v": 0.05, "Rm": 0.09809160621761658},
+        "md_original_selection": {
+          "dn": "DN40", "excel_row": 59, "G_row": 712.0, "v": 0.15, "Rm": 4.50,
+          "role": "MD 表行原值，仅诊断对照；仲裁后数值期望改为“锁定 DN 后的插值结果”"
+        }
+      },
+      {
+        "segment": 20,
+        "md_lines": "MD L62（R_pj≈16.24）/ L68",
+        "input": {"G": 419.6, "R_pj_target": 16.24},
+        "expected": {"dn": "DN32", "G_actual": 345.0, "v": 0.1215606936416185, "Rm": 7.973526011560694},
+        "tolerance": {"dn": 0.0, "G_actual": 0.0, "v": 0.05, "Rm": 0.15947052023121388},
+        "md_original_selection": {
+          "dn": "DN25", "excel_row": 35, "G_row": 412.0, "v": 0.20, "Rm": 32.0,
+          "role": "MD 原选法属工程微调（MD L68：“比目标略大，缩小管径以消耗压力”），与统一“最接近”规则不一致；按仲裁仅注释/诊断，不作为断言期望"
+        }
+      }
+    ],
+    "md_original_selection_note": "MD 管段20 原选 DN25（查表 v=0.20, R=32；表行 G=412，Excel 第 35 行），是 MD L68 明示的工程微调（“比目标略大，缩小管径以消耗压力”）；统一“最接近 R_pj_target”规则下实际输出为 DN32（插值 Rm=7.973526011560694，|7.9735-16.24|≈8.266 小于 DN25 的 |33.2544-16.24|≈17.014）。仲裁决定统一规则，故 test_lookup.py 的断言期望为 DN32，DN25 仅保留注释/诊断对照，不作断言。",
+    "context_anchors": [
+      {
+        "name": "Loop1 平均比摩阻 R_pj",
+        "value": 4.95,
+        "unit": "Pa/m",
+        "md_line": 20,
+        "role": "task-2 仲裁后作为管段7 / 管段10 的 select_dn R_pj_target 输入"
+      },
+      {
+        "name": "Loop4 专用管段平均比摩阻 R_pj",
+        "value": 16.24,
+        "unit": "Pa/m",
+        "md_line": 62,
+        "role": "管段20 的 select_dn R_pj_target 输入"
+      },
+      {
+        "name": "重力循环系统附加压力（3层房屋、高度15m以下、水平距离30~50m）",
+        "value": 350,
+        "unit": "Pa",
+        "md_line": 15,
+        "excel_source_cell": "重力循环上供下回热水供暖系统附加压力 Sheet1 F11（分节：（2）3层或4层的房屋；系统水平距离 25~50；高度 15以下；列 30～50）"
+      }
+    ]
+  },
+  "known_conflict": {
+    "status": "RESOLVED_BY_USER_ARBITRATION",
+    "resolved_at": "2026-10-30（task-2）",
+    "summary": "task-1 暴露的“契约字面语义 vs MD 锚点数值”冲突已由用户仲裁解决；本版本按仲裁 A/B/C 重构，测试期望改为仲裁后的插值结果，不再使用 1e-6 苛刻容差。",
+    "arbitration_decision": [
+      "A. 取值语义：采用按 G 线性插值结果（numpy.interp），取消 1e-6 苛刻容差。",
+      "B. 选径逻辑彻底重构：分离插值函数（interpolate_pipe）与选径函数（select_dn）；select_dn(G, R_pj_target) 在所有覆盖 G 的 DN 组中选插值 Rm 与 R_pj_target 绝对偏差最小者（并列取 DN_ORDER 靠前/小管径）；lookup_pipe 保留为兼容壳（R_target=None 显式 raise ValueError 提示改用 select_dn，非 None 委托 select_dn）。",
+      "C. 测试容差：DN 必须 100% 相等；数值 |actual-expected| <= max(0.05, 0.02*|expected|)；期望值改为“锁定 DN 后的插值结果”，MD 表行原值仅作注释/诊断对照。"
+    ],
+    "seg20_note": "统一“最接近”规则与 MD 管段20 原选 DN25 的差异：MD L68 原选 DN25（v=0.20, R=32；比目标 16.24 略大，用于缩小管径以消耗压力，属工程微调）；统一规则选 DN32（插值 Rm=7.973526011560694，绝对偏差 8.266）而非 DN25（插值 Rm=33.25436893203884，绝对偏差 17.014）。按仲裁，规则统一为最接近，测试断言 DN32；MD 原选法仅在 test_lookup.py 注释与诊断输出中保留，不再作为断言期望。",
+    "historical_evidence_task1": {
+      "note": "以下为 task-1 冲突阶段的精确历史证据，保留以满足“保留历史证据”要求；当前版本不再按这些数值断言。",
+      "literal_contract_outputs_at_task1_time": {
+        "segment_7": {"input": {"G": 1286.2, "R_target": null}, "actual": {"dn": "DN32", "G_actual": 1382.0, "v": 0.3723121387283237, "Rm": 66.13988439306358}},
+        "segment_10": {"input": {"G": 639.7, "R_target": null}, "actual": {"dn": "DN32", "G_actual": 691.0, "v": 0.1851734104046243, "Rm": 17.479479768786128}},
+        "segment_20": {"input": {"G": 419.6, "R_target": 16.24}, "actual": {"dn": "DN32", "G_actual": 345.0, "v": 0.1215606936416185, "Rm": 7.973526011560694}}
+      },
+      "dn_locked_interpolation_vs_md_table_row": {
+        "segment_7_DN65": {"interp_v": 0.09993360995850623, "interp_Rm": 2.384390041493776, "md_row_v": 0.10, "md_row_Rm": 2.39, "dev_v": -6.639004149378014e-05, "dev_Rm": -0.005609958506223922},
+        "segment_10_DN40": {"interp_v": 0.13501554404145077, "interp_Rm": 4.904580310880829, "md_row_v": 0.15, "md_row_Rm": 4.50, "dev_v": -0.01498445595854922, "dev_Rm": 0.4045803108808288},
+        "segment_20_DN25": {"interp_v": 0.20368932038834953, "interp_Rm": 33.25436893203884, "md_row_v": 0.20, "md_row_Rm": 32.0, "dev_v": 0.003689320388349515, "dev_Rm": 1.2543689320388367}
+      },
+      "seg20_selection_variants": {
+        "closest_abs_distance": "DN32（Rm=7.973526011560694，|Δ|=8.266）",
+        "eligible_Rm_le_target_closest": "DN32",
+        "largest_dn_with_Rm_le_target": "DN100（Rm=0.01319496855345912）",
+        "smallest_dn_with_Rm_ge_target": "DN25（Rm=33.25436893203884）——MD 原选法方向"
+      }
+    },
+    "verification": {
+      "direct_run": "python test_lookup.py 全部 PASS（7 个 test_* 函数；含 3 条 select_dn 锚点 actual vs expected 明细）",
+      "pytest": "test_lookup.py 采用 test_* 函数 + 函数内直接 assert 的 pytest 兼容写法；当前交付环境未安装 pytest（Lead 正在配置），pytest 模式待 Lead 环境就绪后复验",
+      "files_touched": ["05_engine/04 ProgramFile/data_loader.py", "05_engine/04 ProgramFile/test_lookup.py", "05_engine/04 ProgramFile/schema_manifest.json"],
+      "read_only_untouched": "04 ProgramFile/README.md 与 02 Calculation Sheet 全目录未修改"
+    }
+  }
+}
