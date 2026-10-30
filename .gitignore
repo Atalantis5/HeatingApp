@@ -1,18 +1,23 @@
-# Python
+# ===== Python / FastAPI 后端 =====
+.venv/
 __pycache__/
 *.py[cod]
+*.db
 .pytest_cache/
-.api_env/
-.venv/
 
-# Node / Vite
+# ===== Node / React 前端 =====
 node_modules/
-.pnpm-store/
-pnpm-store/
 dist/
 .vite/
-*.log
+*.local
 
-# 本地验证临时产物
-.verify/
-.edge-profile/
+# ===== 项目专属大文件与构建产物 =====
+release/
+build/
+docs/*.png
+
+# ===== 系统与编辑器 =====
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
