@@ -36,9 +36,9 @@ class SegmentInput(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     segment_id: int = Field(ge=1, description="管段编号（在 segments 内唯一）")
-    Q: float = Field(gt=0, description="管段热负荷，单位 W")
-    l: float = Field(gt=0, description="管段长度，单位 m")
-    zeta_sum: float = Field(ge=0, description="管段局部阻力系数之和 Σξ")
+    Q: float = Field(gt=0, le=100_000, description="管段热负荷，单位 W（上限 100 kW，防止误输入）")
+    l: float = Field(gt=0, le=100_000, description="管段长度，单位 m（上限 100 km，防止误输入）")
+    zeta_sum: float = Field(ge=0, le=100_000, description="局部阻力系数之和 Σξ（上限 100000）")
     dn_locked: DN | None = Field(
         default=None,
         description="锁定管径（DN15..DN100）；None 表示由查表接口选径",
@@ -54,13 +54,14 @@ class ProjectInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
-    H: float = Field(gt=0, description="锅炉到散热器的高度，单位 m")
-    rho_h: float = Field(gt=0, description="回水密度，单位 kg/m^3")
-    rho_g: float = Field(gt=0, description="供水密度，单位 kg/m^3")
-    dPf: float = Field(ge=0, description="水冷却附加压力，单位 Pa")
+    H: float = Field(gt=0, le=1_000, description="锅炉到散热器的高度，单位 m（上限 1000 m）")
+    rho_h: float = Field(gt=0, le=2_000, description="回水密度，单位 kg/m^3（上限 2000）")
+    rho_g: float = Field(gt=0, le=2_000, description="供水密度，单位 kg/m^3（上限 2000）")
+    dPf: float = Field(ge=0, le=1_000_000, description="水冷却附加压力，单位 Pa（上限 1 MPa）")
     rho_dynamic: float = Field(
         default=961.92,
         gt=0,
+        le=2_000,
         description="动压头计算密度 rho（controller 必须透传给 engine），默认 961.92 kg/m^3",
     )
     max_iter: int = Field(default=20, ge=1, le=100, description="Part A 最大迭代次数")

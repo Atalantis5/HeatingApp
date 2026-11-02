@@ -110,6 +110,12 @@ function normalizeDetail(row) {
   };
 }
 
+/** 拓扑发生变化时，旧水力结果立即失效，禁止继续显示/保存/导出。 */
+function clearCalculationResult(project) {
+  if (!project || project.calculationResult == null) return project;
+  return { ...project, calculationResult: null };
+}
+
 function getLastActiveId() {
   try {
     return window.sessionStorage.getItem(LAST_ACTIVE_KEY);
@@ -208,9 +214,11 @@ export const useProjectStore = create((set, get) => ({
     set({ projectLoading: true, error: null });
     try {
       const project = await fetchProjectDetail(projectId);
-      set({ currentProject: project });
-      setLastActiveId(project.id);
-      return project;
+      // H2：加载项目也必须丢弃持久化的旧结果，避免把历史结果当作当前拓扑的结果展示。
+      const hydratedProject = { ...project, calculationResult: null };
+      set({ currentProject: hydratedProject });
+      setLastActiveId(hydratedProject.id);
+      return hydratedProject;
     } catch (error) {
       console.error("[useProjectStore] 加载案例失败：", error);
       set({ error: error.message });
@@ -357,12 +365,11 @@ export const useProjectStore = create((set, get) => ({
         };
       })
       .filter((edge) => edge.segment_id !== null);
-    const hasCompleteTopology = projectNodes.length > 0 && projectEdges.length === segments.length;
-
     return {
       ...PROJECT_DEFAULTS,
-      nodes: hasCompleteTopology ? projectNodes : [],
-      edges: hasCompleteTopology ? projectEdges : [],
+      // 不再静默丢弃不完整拓扑；后端会对 nodes/edges 不完整请求返回 422。
+      nodes: projectNodes,
+      edges: projectEdges,
       segments: segments.map((segment, index) => ({
         segment_id: index + 1, // 后端 SegmentInput 要求 int 且按顺序计算
         Q: segment.Q,
@@ -390,7 +397,7 @@ export const useProjectStore = create((set, get) => ({
     };
     set((state) => ({
       currentProject: {
-        ...state.currentProject,
+        ...clearCalculationResult(state.currentProject),
         nodes: [...state.currentProject.nodes, node],
         updatedAt: Date.now(),
       },
@@ -435,25 +442,6 @@ export const useProjectStore = create((set, get) => ({
     return layoutedCount;
   },
 
-  /** 删除节点：同步删除相连连线及其管段 */
-  removeNode: (nodeId) => {
-    set((state) => {
-      const removedEdges = state.currentProject.edges.filter(
-        (edge) => edge.source === nodeId || edge.target === nodeId,
-      );
-      const removedEdgeIds = new Set(removedEdges.map((edge) => edge.id));
-      return {
-        currentProject: {
-          ...state.currentProject,
-          nodes: state.currentProject.nodes.filter((node) => node.id !== nodeId),
-          edges: state.currentProject.edges.filter((edge) => !removedEdgeIds.has(edge.id)),
-          segments: state.currentProject.segments.filter((segment) => !removedEdgeIds.has(segment.edge_id)),
-          updatedAt: Date.now(),
-        },
-      };
-    });
-  },
-
   /**
    * 连线成功 → 自动生成新管段（核心联动）：
    *   边 id = edge-<nanoid>；管段 id = “管段 N”（按当前最大编号自增）；
@@ -486,7 +474,7 @@ export const useProjectStore = create((set, get) => ({
       };
       return {
         currentProject: {
-          ...state.currentProject,
+          ...clearCalculationResult(state.currentProject),
           edges: [...state.currentProject.edges, created.edge],
           segments: [...state.currentProject.segments, created.segment],
           updatedAt: Date.now(),
@@ -500,7 +488,7 @@ export const useProjectStore = create((set, get) => ({
   removeSegment: (edgeId) => {
     set((state) => ({
       currentProject: {
-        ...state.currentProject,
+        ...clearCalculationResult(state.currentProject),
         edges: state.currentProject.edges.filter((edge) => edge.id !== edgeId),
         segments: state.currentProject.segments.filter((segment) => segment.edge_id !== edgeId),
         updatedAt: Date.now(),
@@ -510,16 +498,30 @@ export const useProjectStore = create((set, get) => ({
 
   /** 应用 React Flow 的节点变更（尺寸/选中；位置变更由 updateNodePosition 负责） */
   setNodes: (nextNodes) => {
-    set((state) => ({
-      currentProject: { ...state.currentProject, nodes: nextNodes, updatedAt: Date.now() },
-    }));
+    set((state) => {
+      const nodeCountChanged = (nextNodes || []).length !== (state.currentProject.nodes || []).length;
+      return {
+        currentProject: {
+          ...(nodeCountChanged ? clearCalculationResult(state.currentProject) : state.currentProject),
+          nodes: nextNodes,
+          updatedAt: Date.now(),
+        },
+      };
+    });
   },
 
   /** 应用 React Flow 的边变更（选中状态等；删除由 removeSegment 负责） */
   setEdges: (nextEdges) => {
-    set((state) => ({
-      currentProject: { ...state.currentProject, edges: nextEdges, updatedAt: Date.now() },
-    }));
+    set((state) => {
+      const edgeCountChanged = (nextEdges || []).length !== (state.currentProject.edges || []).length;
+      return {
+        currentProject: {
+          ...(edgeCountChanged ? clearCalculationResult(state.currentProject) : state.currentProject),
+          edges: nextEdges,
+          updatedAt: Date.now(),
+        },
+      };
+    });
   },
 
   /** 编辑当前案例某管段的输入（Q / l / dn_locked 等） */

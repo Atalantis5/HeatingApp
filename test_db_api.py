@@ -43,6 +43,7 @@ def _make_engine(database_url: str, **kwargs):
 @pytest.fixture()
 def client():
     """内存 SQLite + dependency_overrides 的 TestClient（不触碰真实 projects.db）。"""
+    previous_overrides = dict(main.app.dependency_overrides)
     engine = _make_engine("sqlite://", poolclass=StaticPool)
     Base.metadata.create_all(bind=engine)
     TestingSession = sessionmaker(
@@ -73,7 +74,9 @@ def client():
     try:
         yield test_client
     finally:
+        # 只清理本 fixture 注入的依赖，保留其他测试模块的计算鉴权 override。
         main.app.dependency_overrides.clear()
+        main.app.dependency_overrides.update(previous_overrides)
         engine.dispose()
 
 

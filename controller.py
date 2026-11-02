@@ -875,8 +875,21 @@ def run_hydraulic_calculation(project: ProjectInput) -> dict:
     - 图模式（nodes+edges 非空）：
       * 单热源枝状 DAG → 原 Part A / Part B 流程（V7 结果保持不变）；
       * 环状管网或多热源 → V8.1 Hardy-Cross 流量平差；
-    - 旧版兼容模式（nodes/edges 为空）：沿用 segments 顺序 + shared_segments。
+    - 若请求显式携带 nodes/edges 但拓扑为空或缺一边，说明拓扑不完整，直接抛 ValueError
+      → HTTP 422；前端不得再把“不完整拓扑”静默改成空拓扑后回退旧算法。
+    - 完全未携带 topology 字段的旧版请求仅作为显式 API 兼容入口保留（前端不再走此路径）。
     """
+    topology_fields_supplied = "nodes" in project.model_fields_set or "edges" in project.model_fields_set
+    if topology_fields_supplied and (not project.nodes or not project.edges):
+        raise ValueError(
+            "拓扑不完整：nodes 与 edges 必须同时提供，且所有管段必须对应一条边；"
+            "已禁止静默回退旧算法。请检查画布上的孤立节点、断头连线或缺失管段。"
+        )
+    if bool(project.nodes) != bool(project.edges):
+        raise ValueError(
+            "拓扑不完整：nodes 与 edges 必须同时提供，且所有管段必须对应一条边；"
+            "已禁止静默回退旧算法。请检查画布上的孤立节点、断头连线或缺失管段。"
+        )
     if project.nodes and project.edges:
         graph, _ = build_topology_graph(project)
         sources = _detect_heat_sources(graph, project)

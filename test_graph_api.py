@@ -25,7 +25,19 @@ from fastapi.testclient import TestClient
 
 import controller
 import main
+from auth import get_current_user
 
+
+class _TestUser:
+    id = "pytest-graph-user"
+    username = "pytest-graph-user"
+
+
+def _override_get_current_user():
+    return _TestUser()
+
+
+main.app.dependency_overrides[get_current_user] = _override_get_current_user
 client = TestClient(main.app)
 
 # ---------------------------------------------------------------------------

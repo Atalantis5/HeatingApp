@@ -7,8 +7,8 @@
 - OAuth2PasswordBearer 依赖：从 Authorization: Bearer <token> 获取当前用户；
 - POST /token 表单登录路由（供 main.py include_router）。
 
-安全说明：生产部署应通过环境变量 GRAVITY_AUTH_SECRET 覆盖默认密钥，
-默认值仅用于本地教学/演示环境。
+安全说明：SECRET_KEY 必须由环境变量 GRAVITY_AUTH_SECRET 提供；
+未配置时在导入阶段直接抛出 RuntimeError，禁止使用可预测的默认密钥启动。
 """
 from __future__ import annotations
 
@@ -27,7 +27,18 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models_user import User
 
-SECRET_KEY = os.environ.get("GRAVITY_AUTH_SECRET", "gravity-heating-local-dev-secret-change-in-production")
+def _require_secret_key() -> str:
+    """读取 JWT 签名密钥；生产/测试环境必须显式配置，禁止硬编码默认值。"""
+    secret = os.environ.get("GRAVITY_AUTH_SECRET", "").strip()
+    if not secret:
+        raise RuntimeError(
+            "缺少环境变量 GRAVITY_AUTH_SECRET：JWT 签名密钥必须显式配置，"
+            "禁止使用默认密钥启动。例如：set GRAVITY_AUTH_SECRET=<随机长字符串>"
+        )
+    return secret
+
+
+SECRET_KEY = _require_secret_key()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("GRAVITY_AUTH_EXPIRE_MINUTES", "1440"))
 PBKDF2_ITERATIONS = 390_000

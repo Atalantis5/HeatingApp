@@ -346,8 +346,11 @@ def validate_topology(project: ProjectInput) -> TopologyResponse:
 # 水力计算
 # ---------------------------------------------------------------------------
 @app.post("/calculate", response_model=CalculationResponse, responses=_ERROR_RESPONSES)
-def calculate(project: ProjectInput) -> CalculationResponse:
-    """执行 Part A 最不利环路 + Part B 并联环路计算。"""
+def calculate(
+    project: ProjectInput,
+    current_user: User = Depends(get_current_user),
+) -> CalculationResponse:
+    """执行 Part A 最不利环路 + Part B 并联环路计算（须登录）。"""
     result = controller.run_hydraulic_calculation(project)
     return CalculationResponse(**result)
 
@@ -574,16 +577,24 @@ def build_excel_workbook(project: ProjectInput, result: dict, project_name: str 
 
 
 @app.post("/export/markdown", response_class=PlainTextResponse, responses=_ERROR_RESPONSES)
-def export_markdown(project: ProjectInput, project_name: str = "") -> PlainTextResponse:
-    """导出 Markdown 报表：内部执行完整水力计算，返回纯文本（前端一键复制）。"""
+def export_markdown(
+    project: ProjectInput,
+    project_name: str = "",
+    current_user: User = Depends(get_current_user),
+) -> PlainTextResponse:
+    """导出 Markdown 报表（须登录）：执行同一计算并返回纯文本。"""
     result = controller.run_hydraulic_calculation(project)
     content = build_markdown_report(project, result, project_name=project_name)
     return PlainTextResponse(content=content, media_type="text/markdown; charset=utf-8")
 
 
 @app.post("/export/excel", responses=_ERROR_RESPONSES)
-def export_excel(project: ProjectInput, project_name: str = "") -> Response:
-    """导出 Excel 报表：pandas + openpyxl 生成文件流，前端 Blob 下载。"""
+def export_excel(
+    project: ProjectInput,
+    project_name: str = "",
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """导出 Excel 报表（须登录）：pandas + openpyxl 生成文件流，前端 Blob 下载。"""
     result = controller.run_hydraulic_calculation(project)
     content = build_excel_workbook(project, result, project_name=project_name)
     filename = f"{project_name.strip() or 'case'}_hydraulic_calculation.xlsx"
@@ -654,9 +665,62 @@ def _humanize_validation_error(error: dict) -> str:
     return raw_message
 
 
+def _collect_segment_validation_errors(exc: RequestValidationError) -> list[dict]:
+    """从 Pydantic 错误中提取 segments[i] 的校验错误，供前端按 segment_id 精准标红。
+
+    返回形如：
+    [{"segment_id": 2, "field": "Q", "message": "数值必须大于 0.0"}, ...]
+    只返回能定位到具体管段的错误；模型级错误仍由 detail 字符串兜底。
+    """
+    raw_body = exc.body if isinstance(exc.body, dict) else {}
+    raw_segments = raw_body.get("segments") if isinstance(raw_body.get("segments"), list) else []
+    collected: list[dict] = []
+    seen: set[tuple[int, str]] = set()
+
+    for error in exc.errors():
+        loc = list(error.get("loc", []))
+        segment_index = None
+        if len(loc) >= 3 and loc[0] == "body" and loc[1] == "segments" and isinstance(loc[2], int):
+            segment_index = loc[2]
+            field = str(loc[-1])
+        elif len(loc) >= 2 and loc[0] == "segments" and isinstance(loc[1], int):
+            segment_index = loc[1]
+            field = str(loc[-1])
+        else:
+            continue
+
+        segment_id = None
+        if 0 <= segment_index < len(raw_segments) and isinstance(raw_segments[segment_index], dict):
+            segment_id = raw_segments[segment_index].get("segment_id")
+        if segment_id is None:
+            continue
+        try:
+            segment_id = int(segment_id)
+        except (TypeError, ValueError):
+            continue
+
+        key = (segment_id, field)
+        if key in seen:
+            continue
+        seen.add(key)
+        collected.append(
+            {
+                "segment_id": segment_id,
+                "field": field,
+                "message": _humanize_validation_error(error),
+            }
+        )
+    return collected
+
+
 @app.exception_handler(RequestValidationError)
 async def handle_request_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
-    """Pydantic 请求体校验失败 → 422，detail 统一为自然语言字符串（前端直接弹窗）。"""
+    """Pydantic 请求体校验失败 → 422。
+
+    - `detail` 保持自然语言字符串，兼容旧客户端/弹窗；
+    - `segment_errors` 是结构化数组，前端据此直接标红对应管段行；
+    - 其余非管段级错误仍在 `detail` 中给出。
+    """
     messages = []
     for error in exc.errors():
         location = ".".join(str(item) for item in error.get("loc", []) if item != "body")
@@ -665,7 +729,11 @@ async def handle_request_validation_error(request: Request, exc: RequestValidati
     detail = "请求参数校验失败：" + "；".join(messages[:5])
     return JSONResponse(
         status_code=422,
-        content={"detail": detail, "error_type": "RequestValidationError"},
+        content={
+            "detail": detail,
+            "error_type": "RequestValidationError",
+            "segment_errors": _collect_segment_validation_errors(exc),
+        },
     )
 
 

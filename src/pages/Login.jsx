@@ -361,7 +361,7 @@ export default function Login({ onLogin }) {
               />
 
               <div style={{ textAlign: "center", marginTop: 12, color: "#94a3b8", fontSize: 11 }}>
-                默认管理员：admin / admin123（首次启动自动创建）
+                初始管理员由部署方通过环境变量配置，系统不再提供默认密码
               </div>
             </Card>
           </div>

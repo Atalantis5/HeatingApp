@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import os
 import re
 import uuid
 from pathlib import Path
@@ -36,8 +37,18 @@ SEGMENT_EXCEL = CALC_SHEET_DIR / "默认管路模型_管段明细参数.xlsx"
 LOOP_EXCEL = CALC_SHEET_DIR / "默认管路模型_环路参数.xlsx"
 
 DEFAULT_PROJECT_NAME = "教科书默认案例（图4-3-1）"
-DEFAULT_ADMIN_USERNAME = "admin"
-DEFAULT_ADMIN_PASSWORD = "admin123"
+DEFAULT_ADMIN_USERNAME = os.environ.get("HEATING_APP_ADMIN_USERNAME", "admin").strip() or "admin"
+
+
+def _require_admin_password() -> str:
+    """读取初始管理员密码；缺失时抛 RuntimeError，禁止回退到固定弱密码。"""
+    password = os.environ.get("HEATING_APP_ADMIN_PASSWORD", "")
+    if not password:
+        raise RuntimeError(
+            "缺少环境变量 HEATING_APP_ADMIN_PASSWORD：首次初始化必须显式配置管理员密码，"
+            "禁止使用固定弱密码。例如：set HEATING_APP_ADMIN_PASSWORD=<强密码>"
+        )
+    return password
 
 SOURCE_NODE = "N_SOURCE"
 SINK_NODE = "N_SINK"
@@ -340,15 +351,15 @@ def _migrate_projects_user_id_column() -> None:
         )
 
 
-def _ensure_admin_user(session) -> User:
-    """确保默认系统用户 admin 存在（password: admin123，PBKDF2 哈希存储）。"""
+def _ensure_admin_user(session, admin_password: str) -> User:
+    """确保初始管理员存在；密码由 HEATING_APP_ADMIN_PASSWORD 显式提供。"""
     admin = session.query(User).filter(User.username == DEFAULT_ADMIN_USERNAME).first()
     if admin is not None:
         return admin
     admin = User(
         id=str(uuid.uuid4()),
         username=DEFAULT_ADMIN_USERNAME,
-        hashed_password=auth.hash_password(DEFAULT_ADMIN_PASSWORD),
+        hashed_password=auth.hash_password(admin_password),
     )
     session.add(admin)
     session.commit()
@@ -369,10 +380,11 @@ def ensure_database() -> bool:
 
     @returns True 表示本次写入默认案例；False 表示数据库已有数据。
     """
+    admin_password = _require_admin_password()
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as session:
         _migrate_projects_user_id_column()
-        admin = _ensure_admin_user(session)
+        admin = _ensure_admin_user(session, admin_password)
 
         unbound_projects = session.query(Project).filter(Project.user_id.is_(None)).all()
         if unbound_projects:

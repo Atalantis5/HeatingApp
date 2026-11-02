@@ -30,8 +30,23 @@ from pydantic import ValidationError
 import engine
 import main
 import models
+from auth import get_current_user
 
 client = TestClient(main.app)
+
+
+class _TestUser:
+    """计算 API 单测使用的固定认证用户（不触碰真实登录流程）。"""
+
+    id = "pytest-user"
+    username = "pytest-user"
+
+
+def _override_get_current_user():
+    return _TestUser()
+
+
+main.app.dependency_overrides[get_current_user] = _override_get_current_user
 
 # ---------------------------------------------------------------------------
 # 《默认模型的计算典例.md》数据（Loop1 / Loop4，MD 管径作为 dn_locked）
@@ -312,3 +327,47 @@ def test_error_handlers(monkeypatch):
     response = client.post("/calculate", json=_payload(LOOP1_SEGMENTS))
     assert response.status_code == 500
     assert response.json()["error_type"] == "RuntimeError"
+
+
+# ---------------------------------------------------------------------------
+# [9] V9.0.1：结构化 segment_errors、拓扑不完整 422、计算/导出鉴权
+# ---------------------------------------------------------------------------
+def test_segment_validation_error_has_segment_id_array():
+    response = client.post("/calculate", json=_payload([_seg(1, 0, 2, 1)]))
+    assert response.status_code == 422
+    body = response.json()
+    assert isinstance(body.get("segment_errors"), list)
+    assert body["segment_errors"][0]["segment_id"] == 1
+    assert body["segment_errors"][0]["field"] == "Q"
+    assert "大于" in body["segment_errors"][0]["message"] or "0" in body["segment_errors"][0]["message"]
+
+
+def test_incomplete_topology_returns_422_instead_of_legacy_fallback():
+    payload = _payload(
+        LOOP1_SEGMENTS,
+        nodes=[{"id": "B", "type": "boiler"}],
+        edges=[],
+    )
+    response = client.post("/calculate", json=payload)
+    assert response.status_code == 422
+    body = response.json()
+    # Pydantic 的模型级 nodes/edges 成对校验会先拦截；若未来移到 controller，
+    # 则是 ValueError 分支。两种都必须返回 422，且不能静默回退 legacy。
+    assert body.get("error_type") in {"RequestValidationError", "ValueError"}
+    assert "nodes 与 edges 必须同时提供" in body["detail"] or "拓扑不完整" in body["detail"]
+
+
+def test_calculate_and_export_require_authentication():
+    saved = main.app.dependency_overrides.pop(get_current_user, None)
+    try:
+        unauthenticated = TestClient(main.app)
+        calculate_response = unauthenticated.post("/calculate", json=_payload(LOOP1_SEGMENTS))
+        export_response = unauthenticated.post(
+            "/export/markdown?project_name=auth-check",
+            json=_payload(LOOP1_SEGMENTS),
+        )
+        assert calculate_response.status_code == 401
+        assert export_response.status_code == 401
+    finally:
+        if saved is not None:
+            main.app.dependency_overrides[get_current_user] = saved

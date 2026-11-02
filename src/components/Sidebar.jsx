@@ -51,6 +51,7 @@ export default function Sidebar() {
   const projectsLoading = useProjectStore((state) => state.projectsLoading);
   const projectLoading = useProjectStore((state) => state.projectLoading);
   const saving = useProjectStore((state) => state.saving);
+  const calculationNotConverged = currentProject.calculationResult?.status === "not_converged";
   const newProject = useProjectStore((state) => state.newProject);
   const setProjectName = useProjectStore((state) => state.setProjectName);
   const saveCurrentProject = useProjectStore((state) => state.saveCurrentProject);
@@ -89,6 +90,10 @@ export default function Sidebar() {
   };
 
   const handleSave = async () => {
+    if (calculationNotConverged) {
+      message.error("计算未收敛，已禁止保存案例；请修正后重新计算");
+      return;
+    }
     try {
       const saved = await saveCurrentProject();
       message.success(`案例「${saved.name}」已保存到 SQLite 数据库`);
@@ -213,6 +218,7 @@ export default function Sidebar() {
               icon={<SaveOutlined />}
               block
               loading={saving}
+              disabled={calculationNotConverged}
               onClick={handleSave}
               data-testid="btn-save-project"
             >

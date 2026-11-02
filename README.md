@@ -6,6 +6,18 @@
 > 找出最不利环路与并联环路共用管段，再用教材同源的**插值选径 + 水力计算公式**完成选径、阻力计算
 > 与平衡校核，最后生成决策看板与 Markdown / Excel 报表。所有案例数据保存在本地 SQLite，无需联网、
 > 无需数据库服务器。
+>
+> **V9.0.1 安全启动前置条件（必须）**：启动前必须设置 JWT 密钥与初始管理员密码，系统不再提供
+> 默认密钥/默认密码；缺失时后端会直接抛出 `RuntimeError` 并拒绝启动。
+>
+> ```bat
+> set GRAVITY_AUTH_SECRET=<至少 32 位的随机字符串>
+> set HEATING_APP_ADMIN_PASSWORD=<强密码>
+> set HEATING_APP_ADMIN_USERNAME=admin
+> ```
+>
+> PowerShell 使用 `$env:GRAVITY_AUTH_SECRET="..."` 等写法。该密码只在首次建库时用于创建管理员；
+> 已有数据库不会因修改环境变量而自动改密，请在首次部署时设置强密码。
 
 ---
 

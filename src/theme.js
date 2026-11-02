@@ -97,4 +97,3 @@ export const engineeringTheme = {
 };
 
 export const APP_VERSION = "V8.5";
-export const APP_VERSION_NOTE = "陈致远 暖通计算工作台 · NetworkX 图论寻优 · Hardy-Cross 平差";

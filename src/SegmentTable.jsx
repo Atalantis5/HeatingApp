@@ -90,7 +90,9 @@ export default function SegmentTable({
       align: "right",
       render: (_, record) => (
         <InputNumber
-          min={0}
+          min={0.1}
+          max={100000}
+          step={0.1}
           disabled={disabled}
           value={record[dataIndex]}
           className="segment-number-input"

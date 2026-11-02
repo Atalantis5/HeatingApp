@@ -11,7 +11,7 @@
  * - 表格展示 Store.segments（显示序号映射为 管段 1..N），编辑 Q/l/dn_locked 写回 Store；
  * - 计算结果仍全部来自后端 /calculate，前端不包含任何水力公式。
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   App as AntdApp,
@@ -42,7 +42,7 @@ import Dashboard from "./components/Dashboard";
 import Sidebar from "./components/Sidebar";
 import TopologyEditor from "./components/TopologyEditor";
 import { APP_VERSION, engineeringTheme } from "./theme";
-import { getAuthToken } from "./utils/request";
+import { fetchWithAuth, getAuthToken } from "./utils/request";
 import { validateTopology } from "./utils/topologyValidator";
 import { useProjectStore } from "./store/useProjectStore";
 
@@ -87,6 +87,21 @@ export function extractSegmentIds(detail) {
   return Array.from(ids);
 }
 
+/** 从后端结构化 422 响应中提取 segment_id；没有结构体时回退到旧 detail 文本解析。 */
+export function extractSegmentErrorIds(errorBody) {
+  const structured = errorBody?.segment_errors;
+  if (Array.isArray(structured) && structured.length > 0) {
+    return Array.from(
+      new Set(
+        structured
+          .map((item) => Number(item?.segment_id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    );
+  }
+  return extractSegmentIds(errorBody?.detail);
+}
+
 function Workbench() {
   const { message } = AntdApp.useApp();
 
@@ -108,9 +123,11 @@ function Workbench() {
   const [calculating, setCalculating] = useState(false);
   const [exporting, setExporting] = useState(null); // "markdown" | "excel" | null
   const [topologyErrors, setTopologyErrors] = useState([]); // 前端拓扑预校验错误
+  const calculateAbortRef = useRef(null);
 
   const segments = currentProject.segments;
   const calcResult = currentProject.calculationResult;
+  const calculationNotConverged = calcResult?.status === "not_converged";
 
   // V6.2：页面加载时从后端 SQLite 拉取案例列表并自动加载上次活跃/第一个项目
   useEffect(() => {
@@ -118,9 +135,12 @@ function Workbench() {
   }, [initializeProjects]);
 
 
-  // 切换案例时清空前端拓扑校验警告
+  // 切换案例时清空前端拓扑校验警告，并中止上一个案例尚未返回的计算请求
   useEffect(() => {
     setTopologyErrors([]);
+    return () => {
+      calculateAbortRef.current?.abort();
+    };
   }, [currentProject.id]);
 
   /** 点击计算/校验前的统一前端拓扑预校验（失败直接弹错并中止请求） */
@@ -137,13 +157,17 @@ function Workbench() {
 
   /**
    * 表格数据 = Store.segments 按顺序映射为「管段 1..N」显示序号，
-   * 并合并后端计算结果（按 payload 顺序 index 对应，前端不做任何计算）。
+   * 并合并后端计算结果。结果必须按后端 segment_id 查找，禁止使用数组下标，
+   * 否则删除/新增管段后旧结果会错位到别的行。
    */
   const tableSegments = useMemo(() => {
     const results = calcResult?.segment_results || [];
+    const resultBySegmentId = new Map(
+      results.map((item) => [Number(item?.segment_id), item]),
+    );
     return (segments || []).map((segment, index) => {
-      const backendResult = results[index];
       const base = { ...segment, segment_id: index + 1 };
+      const backendResult = resultBySegmentId.get(Number(base.segment_id));
       if (!backendResult) return base;
       return {
         ...base,
@@ -170,12 +194,12 @@ function Workbench() {
     [segments, updateSegment, setCalculationResult, calcResult],
   );
 
-  /** 表格失焦校验：仅做输入完整性检查（Q/l 必须为正数），不做水力计算 */
+  /** 表格失焦校验：仅做输入完整性检查（Q/l 必须不小于前端下限 0.1），不做水力计算 */
   const handleRowBlur = useCallback(
     (displaySegmentId) => {
       const index = Number(displaySegmentId) - 1;
       const row = segments[index];
-      const invalid = !row || !(Number(row.Q) > 0) || !(Number(row.l) > 0);
+      const invalid = !row || !(Number(row.Q) >= 0.1) || !(Number(row.l) >= 0.1);
       setSegmentErrors((errors) => {
         const hasError = errors.includes(displaySegmentId);
         if (invalid && !hasError) return [...errors, displaySegmentId];
@@ -191,7 +215,7 @@ function Workbench() {
     if (!validateTopologyBeforeRequest()) return;
     setValidating(true);
     try {
-      const response = await fetch(`${API_BASE}/validate-topology`, {
+      const response = await fetchWithAuth(`${API_BASE}/validate-topology`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(buildCalculationPayload()),
@@ -199,7 +223,7 @@ function Workbench() {
       if (response.status === 422) {
         const errorBody = await response.json();
         const detail = errorBody?.detail ?? "拓扑校验失败（422）";
-        const failedIds = extractSegmentIds(detail);
+        const failedIds = extractSegmentErrorIds(errorBody);
         if (typeof detail === "string") setTopologyErrors([detail]);
         message.error(typeof detail === "string" ? detail : "拓扑校验失败，请检查输入");
         setSegmentErrors(failedIds);
@@ -221,25 +245,41 @@ function Workbench() {
       }
       setSegmentErrors([]);
       markEdgeErrors([]);
+    } catch (error) {
+      message.error(`拓扑校验请求失败：${error.message}`);
     } finally {
       setValidating(false);
     }
   }, [buildCalculationPayload, markEdgeErrors, validateTopologyBeforeRequest]);
 
-  /** 开始计算：POST /calculate；结果全部来源于后端，写入 Store 后渲染 */
+  /** 开始计算：POST /calculate；结果全部来源于后端，写入 Store 后渲染。 */
   const handleCalculate = useCallback(async () => {
     if (!validateTopologyBeforeRequest()) return;
+    const requestProjectId = useProjectStore.getState().currentProject.id;
+    if (!requestProjectId) {
+      message.error("当前案例尚未加载完成，无法计算");
+      return;
+    }
+    const isSameProject = () => useProjectStore.getState().currentProject.id === requestProjectId;
+
+    // H4：取消上一请求；若响应回来时项目 id 已变化，直接丢弃，绝不串项目写结果。
+    calculateAbortRef.current?.abort();
+    const controller = new AbortController();
+    calculateAbortRef.current = controller;
     setCalculating(true);
     try {
-      const response = await fetch(`${API_BASE}/calculate`, {
+      const response = await fetchWithAuth(`${API_BASE}/calculate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(buildCalculationPayload()),
+        signal: controller.signal,
       });
+      if (!isSameProject()) return;
       if (response.status === 422) {
         const errorBody = await response.json();
+        if (!isSameProject()) return;
         const detail = errorBody?.detail ?? "前置条件失败（422）";
-        const failedIds = extractSegmentIds(detail);
+        const failedIds = extractSegmentErrorIds(errorBody);
         message.error(typeof detail === "string" ? detail : "计算输入校验失败，请检查参数");
         setSegmentErrors(failedIds);
         markEdgeErrors(failedIds);
@@ -250,19 +290,34 @@ function Workbench() {
         return;
       }
       const result = await response.json();
+      if (!isSameProject()) return;
       setCalculationResult(result);
       setSegmentErrors([]);
-      message.success("计算完成（结果已写入当前案例，点击左侧「保存当前案例」可持久化）");
+      if (result?.status === "not_converged") {
+        message.warning("计算未收敛：结果已标记为不可保存/导出，请检查管网或参数");
+      } else {
+        message.success("计算完成（结果已写入当前案例，点击左侧「保存当前案例」可持久化）");
+      }
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+      if (isSameProject()) message.error(`计算请求失败：${error.message}`);
     } finally {
-      setCalculating(false);
+      if (calculateAbortRef.current === controller) {
+        calculateAbortRef.current = null;
+        setCalculating(false);
+      }
     }
   }, [buildCalculationPayload, setCalculationResult, markEdgeErrors, validateTopologyBeforeRequest]);
 
   /** 复制 Markdown 报表：POST /export/markdown → navigator.clipboard.writeText */
   const handleCopyMarkdown = useCallback(async () => {
+    if (calculationNotConverged) {
+      message.error("计算未收敛，已禁止复制报表");
+      return;
+    }
     setExporting("markdown");
     try {
-      const response = await fetch(
+      const response = await fetchWithAuth(
         `${API_BASE}/export/markdown?project_name=${encodeURIComponent(currentProject.name)}`,
         {
           method: "POST",
@@ -281,13 +336,17 @@ function Workbench() {
     } finally {
       setExporting(null);
     }
-  }, [buildCalculationPayload, currentProject.name]);
+  }, [buildCalculationPayload, currentProject.name, calculationNotConverged, message]);
 
   /** 导出 Excel 报表：POST /export/excel → Blob 触发浏览器下载 */
   const handleExportExcel = useCallback(async () => {
+    if (calculationNotConverged) {
+      message.error("计算未收敛，已禁止导出 Excel");
+      return;
+    }
     setExporting("excel");
     try {
-      const response = await fetch(
+      const response = await fetchWithAuth(
         `${API_BASE}/export/excel?project_name=${encodeURIComponent(currentProject.name)}`,
         {
           method: "POST",
@@ -313,12 +372,14 @@ function Workbench() {
     } finally {
       setExporting(null);
     }
-  }, [buildCalculationPayload, currentProject.name]);
+  }, [buildCalculationPayload, currentProject.name, calculationNotConverged, message]);
 
   const topologyStatus = topologyErrors.length > 0
     ? { color: "error", icon: <WarningFilled />, text: "拓扑异常" }
     : calcResult
-      ? { color: calcResult.status === "converged" ? "success" : "warning", icon: <CheckCircleFilled />, text: "计算完成" }
+      ? calculationNotConverged
+        ? { color: "error", icon: <WarningFilled />, text: "计算未收敛" }
+        : { color: "success", icon: <CheckCircleFilled />, text: "计算完成" }
       : { color: "default", icon: null, text: "待计算" };
 
   return (
@@ -390,7 +451,7 @@ function Workbench() {
                 data-testid="btn-copy-markdown"
                 icon={<CopyOutlined />}
                 loading={exporting === "markdown"}
-                disabled={!calcResult || Boolean(exporting)}
+                disabled={!calcResult || Boolean(exporting) || calculationNotConverged}
                 onClick={handleCopyMarkdown}
               >
                 复制报表
@@ -399,7 +460,7 @@ function Workbench() {
                 data-testid="btn-export-excel"
                 icon={<FileExcelOutlined />}
                 loading={exporting === "excel"}
-                disabled={!calcResult || Boolean(exporting)}
+                disabled={!calcResult || Boolean(exporting) || calculationNotConverged}
                 onClick={handleExportExcel}
               >
                 导出 Excel
@@ -408,6 +469,21 @@ function Workbench() {
           </Header>
 
           <Content className="app-content">
+            {calculationNotConverged ? (
+              <Alert
+                className="app-error-alert"
+                type="error"
+                showIcon
+                data-testid="not-converged-banner"
+                message="计算未收敛：结果不可保存或导出"
+                description={`Hardy-Cross 已达最大迭代次数仍未满足 0.1 Pa 闭合差。请检查环状管网拓扑、局部阻力与管径后重新计算。${
+                  Array.isArray(calcResult?.warnings) && calcResult.warnings.length > 0
+                    ? ` ${calcResult.warnings[0]}`
+                    : ""
+                }`}
+              />
+            ) : null}
+
             {storeError ? (
               <Alert
                 className="app-error-alert"

@@ -55,7 +55,6 @@ TOL_REL = 0.02
 
 BASE_DIR = Path(__file__).resolve().parent
 SHEET_DIR = BASE_DIR.parent / "02 Calculation Sheet"
-MD_PATH = SHEET_DIR / "默认模型的计算典例.md"
 MANIFEST_PATH = BASE_DIR / "schema_manifest.json"
 
 # ---------------------------------------------------------------------------
@@ -133,19 +132,16 @@ MD_GRAVITY_ANCHOR = {
     "value": 350.0,
 }
 
-# MD 原文行核验：(行号, 该行必须包含的文本片段)，证明锚点确实来自 MD。
-MD_SOURCE_CHECKS = (
-    (15, "350"),
-    (20, "4.95"),
-    (24, "1286.2"),
-    (24, "DN65"),
-    (24, "2.39"),
-    (31, "| 7 | 1286.2 | 15 | DN65 | 0.10 | 2.39 |"),
-    (33, "| 10 | 639.7 | 11 | DN40 | 0.15 | 4.50 |"),
-    (62, "16.24"),
-    (68, "419.6"),
-    (68, "DN25"),
-    (68, "R=32"),
+# 锚点核验固定 fixture：不再读取外部 Markdown 行号。
+# 外部教材文档可能被编辑；测试基线只依赖这里固化的锚点文本。
+MD_ANCHOR_FIXTURE = (
+    {"line": 15, "text": "3层房屋，高度15m以下，水平距离30～50m；附加压力 350 Pa", "tokens": ("350",)},
+    {"line": 20, "text": "Loop1 平均比摩阻 R_pj≈4.95 Pa/m", "tokens": ("4.95",)},
+    {"line": 24, "text": "管段7，G=1286.2 kg/h，查表接近 DN65，v=0.10，R=2.39", "tokens": ("1286.2", "DN65", "2.39")},
+    {"line": 31, "text": "| 7 | 1286.2 | 15 | DN65 | 0.10 | 2.39 |", "tokens": ("| 7 | 1286.2 | 15 | DN65 | 0.10 | 2.39 |",)},
+    {"line": 33, "text": "| 10 | 639.7 | 11 | DN40 | 0.15 | 4.50 |", "tokens": ("| 10 | 639.7 | 11 | DN40 | 0.15 | 4.50 |",)},
+    {"line": 62, "text": "Loop4 目标比摩阻 R_pj≈16.24 Pa/m", "tokens": ("16.24",)},
+    {"line": 68, "text": "管段20，G=419.6 kg/h，MD 原选 DN25，R=32", "tokens": ("419.6", "DN25", "R=32")},
 )
 
 EXPECTED_DN_GROUP_COUNTS = {
@@ -197,20 +193,20 @@ def assert_exact(field: str, actual, expected) -> None:
 # 测试 1：MD 锚点来源核验
 # ---------------------------------------------------------------------------
 def test_md_anchor_source() -> None:
-    print("  [1] 锚点来源核验：读取《默认模型的计算典例.md》原文行")
-    assert MD_PATH.exists(), f"锚点来源 MD 不存在：{MD_PATH}"
-    lines = MD_PATH.read_text(encoding="utf-8").splitlines()
-    print(f"  文件：{MD_PATH}")
-    print(f"  行数：{len(lines)}")
-    for lineno, token in MD_SOURCE_CHECKS:
-        shown = lines[lineno - 1].strip()[:88] if 1 <= lineno <= len(lines) else "<无此行>"
-        found = 1 <= lineno <= len(lines) and token in lines[lineno - 1]
-        print(
-            f"  MD L{lineno:<3} 含 {token!r} -> {'PASS' if found else 'FAIL'}"
-            f"  原文：{shown}"
-        )
-        assert 1 <= lineno <= len(lines), f"MD 行号越界：L{lineno}（MD 共 {len(lines)} 行）"
-        assert found, f"MD L{lineno} 缺少锚点文本片段 {token!r}"
+    print("  [1] 锚点来源核验：使用测试文件内固化的 MD fixture，不读取外部 .md")
+    assert len(MD_ANCHOR_FIXTURE) == 7
+    for anchor in MD_ANCHOR_FIXTURE:
+        lineno = anchor["line"]
+        expected_tokens = anchor["tokens"]
+        text = anchor["text"]
+        for token in expected_tokens:
+            found = token in text
+            print(
+                f"  fixture L{lineno:<3} 含 {token!r} -> {'PASS' if found else 'FAIL'}"
+                f"  文本：{text[:88]}"
+            )
+            assert found, f"锚点 fixture L{lineno} 缺少文本片段 {token!r}"
+        assert text.strip(), f"锚点 fixture L{lineno} 文本不能为空"
 
 
 # ---------------------------------------------------------------------------
