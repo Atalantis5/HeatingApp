@@ -5,7 +5,7 @@
 - 密码哈希：PBKDF2-HMAC-SHA256 + 随机 16 字节盐 + 390000 次迭代（标准库实现，不存明文）；
 - JWT 签发/校验：HS256，payload 包含用户 id(sub)、用户名与过期时间；
 - OAuth2PasswordBearer 依赖：从 Authorization: Bearer <token> 获取当前用户；
-- POST /token 表单登录路由（供 main.py include_router）。
+- POST /token 表单登录路由位于 api/auth.py（本文件只保留认证原语与依赖）。
 
 安全说明：SECRET_KEY 必须由环境变量 GRAVITY_AUTH_SECRET 提供；
 未配置时在导入阶段直接抛出 RuntimeError，禁止使用可预测的默认密钥启动。
@@ -20,8 +20,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -45,7 +45,6 @@ PBKDF2_ITERATIONS = 390_000
 PBKDF2_PREFIX = "pbkdf2_sha256"
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
-router = APIRouter()
 
 
 def _b64encode(raw: bytes) -> str:
@@ -134,23 +133,3 @@ def get_current_user(
     if user is None:
         raise _credentials_exception()
     return user
-
-
-@router.post("/token")
-def login_for_access_token(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db),
-) -> dict:
-    """OAuth2 表单登录：username + password → access_token。"""
-    user = authenticate_user(db, form_data.username, form_data.password)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="用户名或密码错误",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return {
-        "access_token": create_access_token(user),
-        "token_type": "bearer",
-        "username": user.username,
-    }

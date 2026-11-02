@@ -15,7 +15,7 @@ import {
   UserOutlined,
 } from "@ant-design/icons";
 
-import { setAuthToken } from "../utils/request";
+import { fetchWithAuth, setAuthToken } from "../utils/request";
 
 const API_BASE = "/api";
 
@@ -41,11 +41,11 @@ export default function Login({ onLogin }) {
       const body = new URLSearchParams();
       body.set("username", values.username.trim());
       body.set("password", values.password);
-      const response = await fetch(`${API_BASE}/token`, {
+      const response = await fetchWithAuth(`${API_BASE}/token`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: body.toString(),
-      });
+      }, { redirectOnUnauthorized: false });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(readableError(data, `登录失败（HTTP ${response.status}）`));
@@ -65,14 +65,14 @@ export default function Login({ onLogin }) {
     setNotice("");
     setLoading("register");
     try {
-      const response = await fetch(`${API_BASE}/users/register`, {
+      const response = await fetchWithAuth(`${API_BASE}/users/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           username: values.username.trim(),
           password: values.password,
         }),
-      });
+      }, { redirectOnUnauthorized: false });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(readableError(data, `注册失败（HTTP ${response.status}）`));

@@ -13,10 +13,13 @@ import { create } from "zustand";
 import { nanoid } from "nanoid";
 
 import { layoutWithDagre } from "../utils/layout";
-
-import { fetchWithAuth } from "../utils/request";
-
-const API_BASE = "/api";
+import {
+  createProjectRecord,
+  deleteProjectRecord,
+  fetchProjectDetail,
+  fetchProjectList,
+  updateProjectRecord,
+} from "../api/projects";
 
 /** sessionStorage 仅保存“上次活跃案例 id”（UI 偏好，非业务数据） */
 const LAST_ACTIVE_KEY = "gravity-heating-last-active-project";
@@ -92,24 +95,6 @@ function projectData(project) {
   };
 }
 
-function normalizeSummary(row) {
-  return { id: row.id, name: row.name, updatedAt: row.updated_at ?? null };
-}
-
-function normalizeDetail(row) {
-  const data = row.data || {};
-  return {
-    id: row.id,
-    name: row.name,
-    nodes: data.nodes || [],
-    edges: data.edges || [],
-    segments: data.segments || [],
-    calculationResult: data.calculationResult ?? null,
-    createdAt: row.created_at ?? null,
-    updatedAt: row.updated_at ?? null,
-  };
-}
-
 /** 拓扑发生变化时，旧水力结果立即失效，禁止继续显示/保存/导出。 */
 function clearCalculationResult(project) {
   if (!project || project.calculationResult == null) return project;
@@ -132,31 +117,6 @@ function setLastActiveId(projectId) {
   } catch (error) {
     console.warn("[useProjectStore] 写入 sessionStorage 失败：", error);
   }
-}
-
-/** 统一 HTTP 请求：失败抛错（不吞掉任何后端错误） */
-async function apiRequest(path, options = {}) {
-  const response = await fetchWithAuth(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    const error = new Error(`后端请求失败 HTTP ${response.status}：${text.slice(0, 300)}`);
-    error.status = response.status;
-    throw error;
-  }
-  if (response.status === 204) return null;
-  return response.json();
-}
-
-async function fetchProjectList() {
-  const rows = await apiRequest("/projects");
-  return rows.map(normalizeSummary);
-}
-
-async function fetchProjectDetail(projectId) {
-  return normalizeDetail(await apiRequest(`/projects/${projectId}`));
 }
 
 const EMPTY_DATA = { nodes: [], edges: [], segments: [], calculationResult: null };
@@ -233,12 +193,7 @@ export const useProjectStore = create((set, get) => ({
     const trimmed = name && String(name).trim() ? String(name).trim() : "未命名案例";
     set({ saving: true, error: null });
     try {
-      const created = normalizeDetail(
-        await apiRequest("/projects", {
-          method: "POST",
-          body: JSON.stringify({ name: trimmed, data: EMPTY_DATA }),
-        }),
-      );
+      const created = await createProjectRecord({ name: trimmed, data: EMPTY_DATA });
       await get().refreshProjects();
       set({ currentProject: created });
       setLastActiveId(created.id);
@@ -268,12 +223,10 @@ export const useProjectStore = create((set, get) => ({
     }
     set({ saving: true, error: null });
     try {
-      const saved = normalizeDetail(
-        await apiRequest(`/projects/${currentProject.id}`, {
-          method: "PUT",
-          body: JSON.stringify({ name: currentProject.name, data: projectData(currentProject) }),
-        }),
-      );
+      const saved = await updateProjectRecord(currentProject.id, {
+        name: currentProject.name,
+        data: projectData(currentProject),
+      });
       await get().refreshProjects();
       set({ currentProject: saved });
       setLastActiveId(saved.id);
@@ -289,7 +242,7 @@ export const useProjectStore = create((set, get) => ({
 
   /** 删除案例（DELETE /projects/{id}） */
   deleteProject: async (projectId) => {
-    await apiRequest(`/projects/${projectId}`, { method: "DELETE" });
+    await deleteProjectRecord(projectId);
     const list = await get().refreshProjects();
     if (get().currentProject.id === projectId) {
       if (list.length > 0) {
@@ -305,12 +258,10 @@ export const useProjectStore = create((set, get) => ({
   /** 克隆案例（GET 源 → POST 副本） */
   cloneProject: async (projectId) => {
     const source = await fetchProjectDetail(projectId);
-    const cloned = normalizeDetail(
-      await apiRequest("/projects", {
-        method: "POST",
-        body: JSON.stringify({ name: `${source.name}（副本）`, data: projectData(source) }),
-      }),
-    );
+    const cloned = await createProjectRecord({
+      name: `${source.name}（副本）`,
+      data: projectData(source),
+    });
     await get().refreshProjects();
     set({ currentProject: cloned });
     setLastActiveId(cloned.id);

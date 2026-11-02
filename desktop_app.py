@@ -25,6 +25,8 @@ import time
 import traceback
 from pathlib import Path
 
+from config import resolve_data_dir
+
 APP_TITLE = "重力循环供暖管网计算系统"
 HOST = "127.0.0.1"
 PORT = 8000
@@ -76,11 +78,7 @@ install_std_streams()
 # ---------------------------------------------------------------------------
 def frozen_data_dir() -> Path:
     """与 database.py 保持一致的 AppData 数据目录（仅用于日志/WebView2 缓存）。"""
-    override = os.environ.get("HEATING_APP_DATA_DIR", "").strip()
-    if override:
-        return Path(override).expanduser().resolve()
-    appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    return Path(appdata) / "HeatingApp"
+    return resolve_data_dir(create=False)
 
 
 def setup_logging() -> logging.Logger:

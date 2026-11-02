@@ -1,4 +1,7 @@
 @echo off
+set GRAVITY_AUTH_SECRET=my-super-secret-key-for-local-dev-1234567890
+set HEATING_APP_ADMIN_PASSWORD=admin123
+set HEATING_APP_ADMIN_USERNAME=admin
 chcp 65001 >nul
 setlocal EnableExtensions
 

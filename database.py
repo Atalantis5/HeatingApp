@@ -13,32 +13,12 @@
 - SQLite 使用 check_same_thread=False，兼容 FastAPI 多线程请求；
 - 本文件不负责数据初始化（默认案例由 init_db.py 负责）。
 """
-import os
-import sys
-from pathlib import Path
-
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-BASE_DIR = Path(__file__).resolve().parent
-IS_FROZEN = bool(getattr(sys, "frozen", False))
+from config import BASE_DIR, IS_FROZEN, resolve_data_dir
 
-
-def _resolve_data_dir() -> Path:
-    """返回可写数据目录：开发=源码目录；打包=%APPDATA%/HeatingApp。"""
-    override = os.environ.get("HEATING_APP_DATA_DIR", "").strip()
-    if override:
-        data_dir = Path(override).expanduser().resolve()
-    elif IS_FROZEN:
-        appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-        data_dir = Path(appdata) / "HeatingApp"
-    else:
-        data_dir = BASE_DIR
-    data_dir.mkdir(parents=True, exist_ok=True)
-    return data_dir
-
-
-DATA_DIR = _resolve_data_dir()
+DATA_DIR = resolve_data_dir(create=True)
 DB_PATH = DATA_DIR / "projects.db"
 DATABASE_URL = f"sqlite:///{DB_PATH.as_posix()}"
 

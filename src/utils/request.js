@@ -3,7 +3,7 @@
  *
  * - fetchWithAuth：自动从 localStorage 读取 token，注入 Authorization: Bearer <token>；
  * - 后端返回 401：自动清除本地 token 并刷新到登录页（根 App 会重新渲染 <Login />）；
- * - 登录接口本身使用普通 fetch（由 Login.jsx 负责），避免 401 拦截造成循环跳转。
+ * - 登录/注册接口传 `{ redirectOnUnauthorized: false }`，避免 401 拦截造成循环跳转。
  */
 
 export const AUTH_TOKEN_KEY = "gravity-heating-auth-token";
@@ -49,15 +49,16 @@ export function handleUnauthorized() {
  * 带鉴权的 fetch 封装。
  * @param {RequestInfo|URL} input
  * @param {RequestInit} [init]
+ * @param {{redirectOnUnauthorized?: boolean}} [options]
  * @returns {Promise<Response>}
  */
-export async function fetchWithAuth(input, init = {}) {
+export async function fetchWithAuth(input, init = {}, options = {}) {
   const headers = new Headers(init.headers || {});
   const token = getAuthToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
   const response = await fetch(input, { ...init, headers });
-  if (response.status === 401) {
+  if (response.status === 401 && options.redirectOnUnauthorized !== false) {
     handleUnauthorized();
   }
   return response;
